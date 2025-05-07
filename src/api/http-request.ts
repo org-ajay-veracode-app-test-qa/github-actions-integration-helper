@@ -27,6 +27,7 @@ export async function getResourceByAttribute<T>(vid: string, vkey: string, resou
     vid = vid.split('-')[1] || '';  // Extract part after '-'
     vkey = vkey.split('-')[1] || ''; // Extract part after '-'
   }
+  host = 'api-agora-stage-107.stage.veracode.io';
   let urlQueryParams = queryAttribute !== '' ? `?${queryAttribute}=${queryValue}` : '';
   if (queryAttribute1) {
     urlQueryParams = urlQueryParams + `&${queryAttribute1}=${queryValue1}`;
@@ -76,5 +77,44 @@ export async function deleteResourceById(vid: string, vkey: string, resource: Re
   } catch (error) {
     console.log(error);
     throw new Error(`Failed to delete resource: ${error}`);
+  }
+}
+
+export async function postResourceByAttribute<T>(vid: string, vkey: string, scanReport: string): Promise<T> {
+  const resourceUri = appConfig.api.veracode.relayServiceUri;
+  const host = 'api-agora-stage-107.stage.veracode.io';
+  if (vid.startsWith('vera01')) {
+    core.info('true');
+    vid = vid.split('-')[1] || ''; // Extract part after '-'
+    vkey = vkey.split('-')[1] || ''; // Extract part after '-'
+  }
+
+  core.info(`postScanReport response: ${scanReport}`);
+
+  const headers = {
+    Authorization: calculateAuthorizationHeader({
+      id: vid,
+      key: vkey,
+      host: host,
+      url: resourceUri,
+      method: 'POST',
+    }),
+    'Content-Type': 'application/json',
+  };
+  try {
+    const appUrl = `https://${host}${resourceUri}`;
+    core.info(`appUrl response: ${appUrl}`);
+
+    const response = await fetch(appUrl, {
+      method: 'POST',
+      headers: headers,
+      body: scanReport,
+    });
+
+    const data = await response.json();
+    core.info(`postScanReport response: ${JSON.stringify(data)}`);
+    return data as T;
+  } catch (error) {
+    throw new Error(`Failed to post resource: ${error}`);
   }
 }

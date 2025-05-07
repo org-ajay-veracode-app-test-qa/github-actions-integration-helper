@@ -5,6 +5,9 @@ import { Inputs, vaildateScanResultsActionInput } from '../inputs';
 import * as VeracodePolicyResult from '../namespaces/VeracodePolicyResult';
 import * as Checks from '../namespaces/Checks';
 import { updateChecks } from './check-service';
+import appConfig from '../app-config';
+import * as VeracodeApplication from '../namespaces/VeracodeApplication';
+import * as http from '../api/http-request';
 
 export async function preparePolicyResults(inputs: Inputs): Promise<void> {
   const octokit = new Octokit({
@@ -47,6 +50,8 @@ export async function preparePolicyResults(inputs: Inputs): Promise<void> {
     const parsedData: VeracodePolicyResult.ResultsData = JSON.parse(data);
     findingsArray = parsedData._embedded.findings;
     resultsUrl = await fs.readFile('results_url.txt', 'utf-8');
+
+    await postScanReport(inputs, findingsArray);
   } catch (error) {
     core.debug(`Error reading or parsing filtered_results.json:${error}`);
     core.setFailed('Error reading or parsing pipeline scan results.');
@@ -151,4 +156,63 @@ function getAnnotations(policyFindings: VeracodePolicyResult.Finding[], javaMave
   });
 
   return annotations;
+}
+
+async function postScanReport(inputs: Inputs, policyFindings: VeracodePolicyResult.Finding[]): Promise<void> {
+  try {
+    const getSelfUserDetailsResource = {
+      resourceUri: appConfig.api.veracode.selfUserUri,
+      queryAttribute: '',
+      queryValue: '',
+    };
+    const applicationResponse: VeracodeApplication.OrganizationData =
+        await http.getResourceByAttribute<VeracodeApplication.OrganizationData>(
+            inputs.event_type,
+            inputs.issue_trigger_flow,
+            getSelfUserDetailsResource,
+        );
+
+    const commit_sha = inputs.head_sha;
+    const org_id = applicationResponse.organization.org_id;
+    const source_repository = inputs.source_repository;
+    const repository_Url = inputs.gitRepositoryUrl;
+    let scan_id;
+
+    core.info('preparePolicyResults : applicationResponse');
+    core.info('commit_sha :' + commit_sha);
+    core.info('org_id :' + org_id);
+    core.info('source_repository :' + source_repository);
+    core.info('repository_Url :' + repository_Url);
+
+    core.info('policyFindings.length :' + policyFindings.length);
+
+    for (let i = 0; i < policyFindings.length; i++) {
+      const element = policyFindings[i];
+      core.info('element.build_id :' + element.build_id);
+      if (typeof element.build_id !== 'undefined') {
+        scan_id = '' + element.build_id;
+        break;
+      }
+    }
+    if (typeof scan_id !== 'undefined') {
+      core.info('preparePolicyResults : POC values');
+      core.info('scan_id :' + scan_id);
+
+      const scanReport = JSON.stringify({
+        scm: 'GITHUB',
+        commitSha: commit_sha,
+        organizationId: org_id,
+        scanId: scan_id,
+        repositoryName: source_repository,
+        repositoryUrl: repository_Url,
+      });
+      // Make the POST request to a given API endpoint
+      core.info(scanReport);
+      const vid = inputs.event_type;
+      const vkey = inputs.issue_trigger_flow;
+      await http.postResourceByAttribute(vid, vkey, scanReport);
+    }
+  } catch (error) {
+    core.info(`Error posting scan report: ${error}`);
+  }
 }
